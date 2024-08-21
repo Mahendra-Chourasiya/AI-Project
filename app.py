@@ -183,6 +183,9 @@ st.write("Upload PDFs and chat with their content")
 # Input the OpenAI API Key
 api_key = st.text_input("Enter your OpenAI API key:", type="password")
 
+# Initialize pdf_files variable
+pdf_files = []
+
 # Main content and sidebar
 col1, col2 = st.columns([2, 1])
 
@@ -298,8 +301,9 @@ with col2:
         st.success(f"Uploaded {len(uploaded_files)} file(s) to the 'pdfs' folder.")
 
     # Display and download PDFs alphabetically
+    pdf_files = sorted([f for f in os.listdir("pdfs") if f.endswith(".pdf")])  # Re-fetch pdf_files
     if pdf_files:
-        pdf_files_sorted = sorted(os.listdir("pdfs"))
+        pdf_files_sorted = sorted(pdf_files)
         for pdf in pdf_files_sorted:
             file_path = os.path.join("pdfs", pdf)
             with open(file_path, "rb") as file:
