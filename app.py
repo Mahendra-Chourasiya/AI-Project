@@ -267,34 +267,15 @@ if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
     if tab == "Chat":
         session_id = st.text_input("Session ID", value="default_session", key='session_id')
         
-        # Save chat history
-        if st.button("Save Chat History", key='save_chat'):
-            session_history = get_session_history(session_id)
-            history_data = session_history.messages
-            with open(f"{session_id}_history.json", "w") as history_file:
-                json.dump(history_data, history_file)
-            st.success("Chat history saved!")
-        
-        # Load chat history
-        if st.button("Load Chat History", key='load_chat'):
-            try:
-                with open(f"{session_id}_history.json", "r") as history_file:
-                    history_data = json.load(history_file)
-                    st.session_state[session_id] = ChatMessageHistory(messages=history_data)
-                st.success("Chat history loaded!")
-            except FileNotFoundError:
-                st.error("No saved history found for this session.")
-        
-        # Chat history management
-        st.text_input("Enter Collaborator ID", value="user1", key='collaborator_id')
-        st.button("Collaborate", key='collaborate')
-
         user_input = st.text_input("Your question:", key='user_question')
         if user_input:
             session_history = get_session_history(session_id)
-            response = conversational_rag_chain.invoke({"input": user_input})
-            st.write("Assistant:", response['answer'])
-            st.write("Chat History:", session_history.messages)
+            try:
+                response = conversational_rag_chain.invoke({"input": user_input})
+                st.write("Assistant:", response.get('answer', 'No answer found'))
+                st.write("Chat History:", session_history.messages)
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
     elif tab == "Documents":
         st.header("PDF Management")
