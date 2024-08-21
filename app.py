@@ -155,6 +155,8 @@
 #     else:
 #         st.write("No PDFs available.")
 
+
+
 import streamlit as st
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -186,17 +188,80 @@ st.set_page_config(layout="wide")
 st.title("📚 Conversational RAG With PDF Uploads and Chat History")
 st.write("Upload PDFs and chat with their content. Enhance your documents with insightful summaries, analysis, and more!")
 
-# Add a sidebar for additional navigation and settings
+# Sidebar for additional navigation and settings
 with st.sidebar:
     st.header("Settings")
     st.text_input("Enter your OpenAI API key:", type="password", key='openai_key')
     st.text_input("Enter your LangChain API key:", type="password", key='langchain_key')
-    
+
     # Tabs for better organization
     tab = st.radio("Navigate", ["Chat", "Documents", "Analysis"])
 
+    # Document management options
+    if tab == "Documents":
+        st.subheader("Manage Documents")
+        st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True, key='upload_files')
+
+        # Remove documents
+        pdf_files_sorted = sorted(os.listdir("pdfs"))
+        if pdf_files_sorted:
+            st.write("### Remove Documents")
+            remove_file = st.selectbox("Select PDF to remove", options=pdf_files_sorted, key='remove_file')
+            if st.button("Remove Selected PDF", key='remove_pdf'):
+                if remove_file:
+                    os.remove(os.path.join("pdfs", remove_file))
+                    st.success(f"Removed {remove_file}")
+                else:
+                    st.error("Please select a file to remove.")
+        else:
+            st.write("No PDFs available to remove.")
+
+# Main content
 if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
     llm = OpenAI(api_key=st.session_state['openai_key'])
+
+    # Functions
+    def get_session_history(session: str) -> BaseChatMessageHistory:
+        if session not in st.session_state:
+            st.session_state[session] = ChatMessageHistory()
+        return st.session_state[session]
+
+    def display_document_statistics(documents):
+        all_text = " ".join([doc.page_content for doc in documents])
+        words = all_text.split()
+        word_count = Counter(words)
+
+        common_words = word_count.most_common(10)
+        words, counts = zip(*common_words)
+
+        fig, ax = plt.subplots()
+        ax.bar(words, counts)
+        st.pyplot(fig)
+
+        st.write("Total Word Count:", len(words))
+        st.write("Most Common Words:", common_words)
+
+    def suggest_queries(documents):
+        all_text = " ".join([doc.page_content for doc in documents])
+        keywords = list(set(all_text.split()))[:5]
+        st.write("Suggested Queries:")
+        for keyword in keywords:
+            if st.button(f"Ask about {keyword}"):
+                st.session_state[session_id].add_message({"role": "user", "content": keyword})
+
+    def thematic_analysis(documents):
+        all_texts = [doc.page_content for doc in documents]
+        vectorizer = TfidfVectorizer(stop_words='english')
+        X = vectorizer.fit_transform(all_texts)
+
+        kmeans = KMeans(n_clusters=5, random_state=42).fit(X)
+        labels = kmeans.labels_
+
+        st.write("Document Themes:")
+        for i, label in enumerate(set(labels)):
+            st.write(f"Theme {i + 1}:")
+            theme_texts = [all_texts[j] for j in range(len(all_texts)) if labels[j] == label]
+            st.write(" ".join(theme_texts[:1]))  # Display first example
 
     # Chat interface
     if tab == "Chat":
@@ -232,15 +297,7 @@ if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
             st.write("Chat History:", session_history.messages)
 
     elif tab == "Documents":
-        st.header("PDF Upload and Management")
-        uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
-        
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                file_path = os.path.join("pdfs", uploaded_file.name)
-                with open(file_path, "wb") as file:
-                    file.write(uploaded_file.getvalue())
-            st.success(f"Uploaded {len(uploaded_files)} file(s) to the 'pdfs' folder.")
+        st.header("PDF Management")
         
         # Display and download PDFs
         pdf_files_sorted = sorted(os.listdir("pdfs"))
@@ -252,7 +309,7 @@ if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
                     st.download_button(label=f"Download {pdf}", data=file, file_name=pdf, mime="application/pdf")
         else:
             st.write("No PDFs available.")
-        
+
     elif tab == "Analysis":
         st.header("Document Analysis")
         
@@ -296,46 +353,3 @@ if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
 
 else:
     st.warning("Please enter both the OpenAI and LangChain API keys in the sidebar.")
-
-# Functions for managing session history and document analysis
-def get_session_history(session: str) -> BaseChatMessageHistory:
-    if session not in st.session_state:
-        st.session_state[session] = ChatMessageHistory()
-    return st.session_state[session]
-
-def display_document_statistics(documents):
-    all_text = " ".join([doc.page_content for doc in documents])
-    words = all_text.split()
-    word_count = Counter(words)
-
-    common_words = word_count.most_common(10)
-    words, counts = zip(*common_words)
-
-    fig, ax = plt.subplots()
-    ax.bar(words, counts)
-    st.pyplot(fig)
-
-    st.write("Total Word Count:", len(words))
-    st.write("Most Common Words:", common_words)
-
-def suggest_queries(documents):
-    all_text = " ".join([doc.page_content for doc in documents])
-    keywords = list(set(all_text.split()))[:5]
-    st.write("Suggested Queries:")
-    for keyword in keywords:
-        if st.button(f"Ask about {keyword}"):
-            st.session_state[session_id].add_message({"role": "user", "content": keyword})
-
-def thematic_analysis(documents):
-    all_texts = [doc.page_content for doc in documents]
-    vectorizer = TfidfVectorizer(stop_words='english')
-    X = vectorizer.fit_transform(all_texts)
-
-    kmeans = KMeans(n_clusters=5, random_state=42).fit(X)
-    labels = kmeans.labels_
-
-    st.write("Document Themes:")
-    for i, label in enumerate(set(labels)):
-        st.write(f"Theme {i + 1}:")
-        theme_texts = [all_texts[j] for j in range(len(all_texts)) if labels[j] == label]
-        st.write(" ".join(theme_texts[:1]))  # Display first example
