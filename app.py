@@ -163,11 +163,11 @@ from langchain.vectorstores import FAISS
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.chains import ConversationChain
 import os
 
 # Ensure the pdfs folder exists
@@ -181,19 +181,18 @@ st.set_page_config(layout="wide")
 st.title("Conversational RAG With PDF Uploads and Chat History")
 st.write("Upload PDFs and chat with their content")
 
-# Input the OpenAI API Key
-api_key = st.text_input("Enter your OpenAI API key:", type="password")
-
-# Initialize pdf_files variable
-pdf_files = []
+# Input the OpenAI API Key and LangChain API Key
+openai_api_key = st.text_input("Enter your OpenAI API key:", type="password")
+langchain_api_key = st.text_input("Enter your LangChain API key:", type="password")
 
 # Main content and sidebar
 col1, col2 = st.columns([2, 1])
 
 # Main content (left column)
 with col1:
-    if api_key:
-        llm = OpenAI(api_key=api_key, model_name="gpt-4")  # Use GPT-4 for better performance
+    if openai_api_key and langchain_api_key:
+        # Set up the OpenAI LLM using LangChain
+        llm = ChatOpenAI(openai_api_key=openai_api_key, langchain_api_key=langchain_api_key, model_name="gpt-4")
 
         # Chat interface
         session_id = st.text_input("Session ID", value="default_session")
@@ -213,7 +212,7 @@ with col1:
                 documents.extend(docs)
 
             # Split and create embeddings for the documents
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=500)
             splits = text_splitter.split_documents(documents)
             vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
             retriever = vectorstore.as_retriever()
@@ -262,27 +261,29 @@ with col1:
                     st.session_state.store[session] = ChatMessageHistory()
                 return st.session_state.store[session]
 
-            conversational_rag_chain = ConversationChain(
-                llm=llm,
-                retriever=history_aware_retriever,
-                chat_history_manager=get_session_history
+            conversational_rag_chain = RunnableWithMessageHistory(
+                rag_chain,
+                get_session_history,
+                input_messages_key="input",
+                history_messages_key="chat_history",
+                output_messages_key="answer"
             )
 
             user_input = st.text_input("Your question:")
             if user_input:
                 session_history = get_session_history(session_id)
                 response = conversational_rag_chain.invoke(
-                    {
-                        "input": user_input,
-                        "chat_history": session_history.messages
-                    }
+                    {"input": user_input},
+                    config={
+                        "configurable": {"session_id": session_id}
+                    },
                 )
                 st.write("Assistant:", response['answer'])
                 st.write("Chat History:", session_history.messages)
         else:
             st.warning("No PDFs available in the 'pdfs' folder.")
     else:
-        st.warning("Please enter the OpenAI API Key")
+        st.warning("Please enter the OpenAI and LangChain API Keys")
 
 # Sidebar (right column)
 with col2:
@@ -300,9 +301,8 @@ with col2:
         st.success(f"Uploaded {len(uploaded_files)} file(s) to the 'pdfs' folder.")
 
     # Display and download PDFs alphabetically
-    pdf_files = sorted([f for f in os.listdir("pdfs") if f.endswith(".pdf")])  # Re-fetch pdf_files
     if pdf_files:
-        pdf_files_sorted = sorted(pdf_files)
+        pdf_files_sorted = sorted(os.listdir("pdfs"))
         for pdf in pdf_files_sorted:
             file_path = os.path.join("pdfs", pdf)
             with open(file_path, "rb") as file:
