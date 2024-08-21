@@ -173,7 +173,6 @@ import json
 import pdfplumber
 import matplotlib.pyplot as plt
 from collections import Counter
-import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 
@@ -269,13 +268,68 @@ if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
         
         user_input = st.text_input("Your question:", key='user_question')
         if user_input:
-            session_history = get_session_history(session_id)
-            try:
-                response = conversational_rag_chain.invoke({"input": user_input})
-                st.write("Assistant:", response.get('answer', 'No answer found'))
-                st.write("Chat History:", session_history.messages)
-            except Exception as e:
-                st.error(f"An error occurred: {e}")
+            # Load PDFs and create vectorstore
+            pdf_files = sorted([os.path.join("pdfs", f) for f in os.listdir("pdfs") if f.endswith(".pdf")])
+            if pdf_files:
+                documents = []
+                for pdf_file in pdf_files:
+                    loader = PyPDFLoader(pdf_file)
+                    docs = loader.load()
+                    documents.extend(docs)
+
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=500)
+                splits = text_splitter.split_documents(documents)
+                vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
+                retriever = vectorstore.as_retriever()
+
+                # System prompts
+                contextualize_q_system_prompt = (
+                    "Given a chat history and the latest user question "
+                    "which might reference context in the chat history, "
+                    "formulate a standalone question which can be understood "
+                    "without the chat history. Do NOT answer the question, "
+                    "just reformulate it if needed and otherwise return it as is."
+                )
+                contextualize_q_prompt = ChatPromptTemplate.from_messages(
+                    [
+                        ("system", contextualize_q_system_prompt),
+                        MessagesPlaceholder("chat_history"),
+                        ("human", "{input}"),
+                    ]
+                )
+
+                history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
+
+                system_prompt = (
+                    "You are an assistant for question-answering tasks. "
+                    "Use the following pieces of retrieved context to answer "
+                    "the question. If you don't know the answer, say that you "
+                    "don't know. Use three sentences maximum and keep the "
+                    "answer concise."
+                    "\n\n"
+                    "{context}"
+                )
+                qa_prompt = ChatPromptTemplate.from_messages(
+                    [
+                        ("system", system_prompt),
+                        MessagesPlaceholder("chat_history"),
+                        ("human", "{input}"),
+                    ]
+                )
+
+                question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+                rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+                conversational_rag_chain = rag_chain
+
+                # Get the response
+                session_history = get_session_history(session_id)
+                try:
+                    response = conversational_rag_chain.invoke({"input": user_input})
+                    st.write("Assistant:", response.get('answer', 'No answer found'))
+                    st.write("Chat History:", session_history.messages)
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
 
     elif tab == "Documents":
         st.header("PDF Management")
