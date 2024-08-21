@@ -162,14 +162,13 @@ from langchain.vectorstores import FAISS
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import OpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_openai import OpenAI
 import os
-import json  # Required for saving and loading chat history
-import pdfplumber  # Required for PDF highlighting
+import json
+import pdfplumber
 import matplotlib.pyplot as plt
 from collections import Counter
 import pandas as pd
@@ -187,7 +186,7 @@ st.set_page_config(layout="wide")
 st.title("Conversational RAG With PDF Uploads and Chat History")
 st.write("Upload PDFs and chat with their content")
 
-# Input the OpenAI API Key
+# Input the OpenAI and LangChain API Keys
 openai_api_key = st.text_input("Enter your OpenAI API key:", type="password")
 langchain_api_key = st.text_input("Enter your LangChain API key:", type="password")
 
@@ -199,11 +198,11 @@ with col1:
     if openai_api_key and langchain_api_key:
         llm = OpenAI(api_key=openai_api_key)
 
-        # Function to get session history (used in several places)
+        # Function to get session history
         def get_session_history(session: str) -> BaseChatMessageHistory:
-            if session not in st.session_state.store:
-                st.session_state.store[session] = ChatMessageHistory()
-            return st.session_state.store[session]
+            if session not in st.session_state:
+                st.session_state[session] = ChatMessageHistory()
+            return st.session_state[session]
 
         # Chat interface
         session_id = st.text_input("Session ID", value="default_session")
@@ -221,7 +220,7 @@ with col1:
             try:
                 with open(f"{session_id}_history.json", "r") as history_file:
                     history_data = json.load(history_file)
-                    st.session_state.store[session_id] = ChatMessageHistory(messages=history_data)
+                    st.session_state[session_id] = ChatMessageHistory(messages=history_data)
                 st.success("Chat history loaded!")
             except FileNotFoundError:
                 st.error("No saved history found for this session.")
@@ -237,7 +236,7 @@ with col1:
                 st.session_state.collaborative_store[collaborator_id] = ChatMessageHistory()
             return st.session_state.collaborative_store[collaborator_id]
 
-        session_history = get_collaborative_history(collaborator_id)
+        collaborative_history = get_collaborative_history(collaborator_id)
 
         # Load all PDFs from the "pdfs" folder
         pdf_files = sorted([os.path.join("pdfs", f) for f in os.listdir("pdfs") if f.endswith(".pdf")])
@@ -271,7 +270,8 @@ with col1:
                     for page_num, page in enumerate(pdf.pages):
                         if context.lower() in page.extract_text().lower():
                             st.write(f"Context found on page {page_num + 1}")
-                            st.button(f"Go to Page {page_num + 1}")
+                            if st.button(f"Go to Page {page_num + 1}"):
+                                st.write(page.extract_text())
 
             if st.button("Navigate PDF"):
                 user_input = st.text_input("Enter context to search in PDF:")
@@ -372,13 +372,8 @@ with col1:
             question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
             rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-            conversational_rag_chain = RunnableWithMessageHistory(
-                rag_chain,
-                get_session_history,
-                input_messages_key="input",
-                history_messages_key="chat_history",
-                output_messages_key="answer"
-            )
+            # If RunnableWithMessageHistory doesn't exist or doesn't fit, use a similar pattern
+            conversational_rag_chain = rag_chain
 
             user_input = st.text_input("Your question:")
             if user_input:
@@ -423,7 +418,15 @@ with col2:
                 mime="application/pdf"
             )
 
-    # Show Highlights in PDF (this part was misplaced earlier)
+    # Show Highlights in PDF
+    def display_pdf_with_highlights(pdf_path, highlights):
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                text = page.extract_text()
+                if any(highlight in text for highlight in highlights):
+                    st.write(f"Highlights on Page {page_num + 1}:")
+                    st.write(text)
+
     if pdf_files and st.button("Show Highlights in PDF"):
         for pdf_file in pdf_files:
             display_pdf_with_highlights(pdf_file, [doc.page_content for doc in documents])
