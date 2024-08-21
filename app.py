@@ -169,7 +169,6 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 import os
-import json
 import pdfplumber
 
 # Ensure the pdfs folder exists
@@ -242,20 +241,6 @@ if openai_api_key and langchain_api_key:
             docs = loader.load()
             documents.extend(docs)
 
-        # Context-Aware PDF Navigation
-        def navigate_pdf(pdf_path, context):
-            with pdfplumber.open(pdf_path) as pdf:
-                for page_num, page in enumerate(pdf.pages):
-                    if context.lower() in page.extract_text().lower():
-                        st.write(f"Context found on page {page_num + 1}")
-                        if st.button(f"Go to Page {page_num + 1}"):
-                            st.write(page.extract_text())
-
-        if st.button("Navigate PDF"):
-            user_input = st.text_input("Enter context to search in PDF:")
-            if user_input:
-                navigate_pdf(pdf_files[0], user_input)
-
         # Split and create embeddings for the documents
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=500)
         splits = text_splitter.split_documents(documents)
@@ -308,10 +293,11 @@ if openai_api_key and langchain_api_key:
             try:
                 session_history = get_session_history(session_id)
                 response = conversational_rag_chain.invoke(
-                    {"input": user_input},
-                    config={
-                        "configurable": {"session_id": session_id}
-                    },
+                    {
+                        "input": user_input,
+                        "chat_history": session_history.messages,  # Pass chat history here
+                        "context": "PDF Content or additional context here"
+                    }
                 )
                 st.write("Assistant:", response['answer'])
                 st.write("Chat History:", session_history.messages)
