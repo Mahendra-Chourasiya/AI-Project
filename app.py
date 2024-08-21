@@ -167,6 +167,7 @@ from langchain_openai import OpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
+from langchain.chains import ConversationChain
 import os
 
 # Ensure the pdfs folder exists
@@ -261,22 +262,20 @@ with col1:
                     st.session_state.store[session] = ChatMessageHistory()
                 return st.session_state.store[session]
 
-            conversational_rag_chain = RunnableWithMessageHistory(
-                rag_chain,
-                get_session_history,
-                input_messages_key="input",
-                history_messages_key="chat_history",
-                output_messages_key="answer"
+            conversational_rag_chain = ConversationChain(
+                llm=llm,
+                retriever=history_aware_retriever,
+                chat_history_manager=get_session_history
             )
 
             user_input = st.text_input("Your question:")
             if user_input:
                 session_history = get_session_history(session_id)
                 response = conversational_rag_chain.invoke(
-                    {"input": user_input},
-                    config={
-                        "configurable": {"session_id": session_id}
-                    },
+                    {
+                        "input": user_input,
+                        "chat_history": session_history.messages
+                    }
                 )
                 st.write("Assistant:", response['answer'])
                 st.write("Chat History:", session_history.messages)
