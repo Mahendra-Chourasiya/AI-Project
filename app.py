@@ -195,9 +195,41 @@ with col1:
         # Chat interface
         session_id = st.text_input("Session ID", value="default_session")
 
+        # Save chat history
+        if st.button("Save Chat History"):
+            session_history = get_session_history(session_id)
+            history_data = session_history.messages
+            with open(f"{session_id}_history.json", "w") as history_file:
+                json.dump(history_data, history_file)
+            st.success("Chat history saved!")
+        
+        # Load chat history
+        if st.button("Load Chat History"):
+            try:
+                with open(f"{session_id}_history.json", "r") as history_file:
+                    history_data = json.load(history_file)
+                    st.session_state.store[session_id] = ChatMessageHistory(messages=history_data)
+                st.success("Chat history loaded!")
+            except FileNotFoundError:
+                st.error("No saved history found for this session.")
+
+        # Replace session management with this for collaborative support
+        if 'collaborative_store' not in st.session_state:
+            st.session_state.collaborative_store = {}
+        
+        collaborator_id = st.text_input("Enter Collaborator ID", value="user1")
+        
+        def get_collaborative_history(collaborator_id: str) -> BaseChatMessageHistory:
+            if collaborator_id not in st.session_state.collaborative_store:
+                st.session_state.collaborative_store[collaborator_id] = ChatMessageHistory()
+            return st.session_state.collaborative_store[collaborator_id]
+        
+        session_history = get_collaborative_history(collaborator_id)
+
+        
         # Statefully manage chat history
-        if 'store' not in st.session_state:
-            st.session_state.store = {}
+        # if 'store' not in st.session_state:
+        #     st.session_state.store = {}
 
         # Load all PDFs from the "pdfs" folder
         pdf_files = sorted([os.path.join("pdfs", f) for f in os.listdir("pdfs") if f.endswith(".pdf")])
@@ -208,12 +240,100 @@ with col1:
                 loader = PyPDFLoader(pdf_file)
                 docs = loader.load()
                 documents.extend(docs)
+                
+        # After loading and splitting the documents (around where you process the PDFs)
+        if st.button("Summarize PDFs"):
+            summary_chain = create_stuff_documents_chain(llm, ChatPromptTemplate.from_messages([
+                ("system", "Provide a concise summary of the following document content."),
+                MessagesPlaceholder("documents")
+            ]))
+            
+            summaries = []
+            for doc in documents:
+                summary = summary_chain.invoke({"documents": doc.page_content})
+                summaries.append(summary)
+            
+            for i, summary in enumerate(summaries, 1):
+                st.subheader(f"Summary of Document {i}:")
+                st.write(summary)
+
+            #Context-Aware PDF Navigation
+            def navigate_pdf(pdf_path, context):
+                with pdfplumber.open(pdf_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages):
+                        if context.lower() in page.extract_text().lower():
+                            st.write(f"Context found on page {page_num + 1}")
+                            st.button(f"Go to Page {page_num + 1}")
+            
+            if st.button("Navigate PDF"):
+                navigate_pdf(pdf_files[0], user_input)
+
 
             # Split and create embeddings for the documents
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=500)
             splits = text_splitter.split_documents(documents)
             vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
             retriever = vectorstore.as_retriever()
+
+            #Visual Analytics Dashboard
+            import matplotlib.pyplot as plt
+            from collections import Counter
+            import pandas as pd
+            
+            def display_document_statistics(documents):
+                all_text = " ".join([doc.page_content for doc in documents])
+                words = all_text.split()
+                word_count = Counter(words)
+                
+                # Display word count histogram
+                common_words = word_count.most_common(10)
+                words, counts = zip(*common_words)
+                
+                fig, ax = plt.subplots()
+                ax.bar(words, counts)
+                st.pyplot(fig)
+            
+                st.write("Total Word Count:", len(words))
+                st.write("Most Common Words:", common_words)
+            
+            # Add this to your main code
+            if st.button("Show Document Statistics"):
+                display_document_statistics(documents)
+
+            #Dynamic Document Query Suggestions
+            def suggest_queries(documents):
+            all_text = " ".join([doc.page_content for doc in documents])
+            keywords = list(set(all_text.split()))[:5]
+            st.write("Suggested Queries:")
+            for keyword in keywords:
+                st.button(f"Ask about {keyword}")
+            
+            if st.button("Suggest Queries"):
+                suggest_queries(documents)
+
+            
+            #Thematic Analysis
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.cluster import KMeans
+            
+            def thematic_analysis(documents):
+                all_texts = [doc.page_content for doc in documents]
+                vectorizer = TfidfVectorizer(stop_words='english')
+                X = vectorizer.fit_transform(all_texts)
+            
+                kmeans = KMeans(n_clusters=5, random_state=42).fit(X)
+                labels = kmeans.labels_
+                
+                st.write("Document Themes:")
+                for i, label in enumerate(set(labels)):
+                    st.write(f"Theme {i + 1}:")
+                    theme_texts = [all_texts[j] for j in range(len(all_texts)) if labels[j] == label]
+                    st.write(" ".join(theme_texts[:1]))  # Display first example
+            
+            if st.button("Analyze Document Themes"):
+                thematic_analysis(documents)
+
+
 
             # System prompt for contextualizing the question
             contextualize_q_system_prompt = (
@@ -309,6 +429,11 @@ with col2:
                     data=file,
                     file_name=pdf,
                     mime="application/pdf"
-                )
+                    )
+    # Add this after processing and displaying PDFs
+    if st.button("Show Highlights in PDF"):
+        for pdf_file in pdf_files:
+            display_pdf_with_highlights(pdf_file, [doc.page_content for doc in documents])
+    
     else:
         st.write("No PDFs available.")
