@@ -155,7 +155,6 @@
 #     else:
 #         st.write("No PDFs available.")
 
-
 import streamlit as st
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -163,11 +162,11 @@ from langchain.vectorstores import FAISS
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import OpenAI
 import os
 
 # Ensure the pdfs folder exists
@@ -181,7 +180,7 @@ st.set_page_config(layout="wide")
 st.title("Conversational RAG With PDF Uploads and Chat History")
 st.write("Upload PDFs and chat with their content")
 
-# Input the OpenAI API Key and LangChain API Key
+# Input the OpenAI API Key
 openai_api_key = st.text_input("Enter your OpenAI API key:", type="password")
 langchain_api_key = st.text_input("Enter your LangChain API key:", type="password")
 
@@ -191,8 +190,7 @@ col1, col2 = st.columns([2, 1])
 # Main content (left column)
 with col1:
     if openai_api_key and langchain_api_key:
-        # Set up the OpenAI LLM using LangChain
-        llm = ChatOpenAI(openai_api_key=openai_api_key, langchain_api_key=langchain_api_key, model_name="gpt-4")
+        llm = OpenAI(api_key=openai_api_key)
 
         # Chat interface
         session_id = st.text_input("Session ID", value="default_session")
@@ -283,7 +281,7 @@ with col1:
         else:
             st.warning("No PDFs available in the 'pdfs' folder.")
     else:
-        st.warning("Please enter the OpenAI and LangChain API Keys")
+        st.warning("Please enter both the OpenAI and LangChain API keys")
 
 # Sidebar (right column)
 with col2:
