@@ -183,40 +183,35 @@ embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # Set up Streamlit layout
 st.set_page_config(layout="wide")
-st.title("Conversational RAG With PDF Uploads and Chat History")
-st.write("Upload PDFs and chat with their content")
+st.title("📚 Conversational RAG With PDF Uploads and Chat History")
+st.write("Upload PDFs and chat with their content. Enhance your documents with insightful summaries, analysis, and more!")
 
-# Input the OpenAI and LangChain API Keys
-openai_api_key = st.text_input("Enter your OpenAI API key:", type="password")
-langchain_api_key = st.text_input("Enter your LangChain API key:", type="password")
+# Add a sidebar for additional navigation and settings
+with st.sidebar:
+    st.header("Settings")
+    st.text_input("Enter your OpenAI API key:", type="password", key='openai_key')
+    st.text_input("Enter your LangChain API key:", type="password", key='langchain_key')
+    
+    # Tabs for better organization
+    tab = st.radio("Navigate", ["Chat", "Documents", "Analysis"])
 
-# Main content and sidebar
-col1, col2 = st.columns([2, 1])
+if st.session_state.get('openai_key') and st.session_state.get('langchain_key'):
+    llm = OpenAI(api_key=st.session_state['openai_key'])
 
-# Main content (left column)
-with col1:
-    if openai_api_key and langchain_api_key:
-        llm = OpenAI(api_key=openai_api_key)
-
-        # Function to get session history
-        def get_session_history(session: str) -> BaseChatMessageHistory:
-            if session not in st.session_state:
-                st.session_state[session] = ChatMessageHistory()
-            return st.session_state[session]
-
-        # Chat interface
-        session_id = st.text_input("Session ID", value="default_session")
-
+    # Chat interface
+    if tab == "Chat":
+        session_id = st.text_input("Session ID", value="default_session", key='session_id')
+        
         # Save chat history
-        if st.button("Save Chat History"):
+        if st.button("Save Chat History", key='save_chat'):
             session_history = get_session_history(session_id)
             history_data = session_history.messages
             with open(f"{session_id}_history.json", "w") as history_file:
                 json.dump(history_data, history_file)
             st.success("Chat history saved!")
-
+        
         # Load chat history
-        if st.button("Load Chat History"):
+        if st.button("Load Chat History", key='load_chat'):
             try:
                 with open(f"{session_id}_history.json", "r") as history_file:
                     history_data = json.load(history_file)
@@ -224,211 +219,123 @@ with col1:
                 st.success("Chat history loaded!")
             except FileNotFoundError:
                 st.error("No saved history found for this session.")
+        
+        # Chat history management
+        st.text_input("Enter Collaborator ID", value="user1", key='collaborator_id')
+        st.button("Collaborate", key='collaborate')
 
-        # Collaborative session management
-        if 'collaborative_store' not in st.session_state:
-            st.session_state.collaborative_store = {}
+        user_input = st.text_input("Your question:", key='user_question')
+        if user_input:
+            session_history = get_session_history(session_id)
+            response = conversational_rag_chain.invoke({"input": user_input})
+            st.write("Assistant:", response['answer'])
+            st.write("Chat History:", session_history.messages)
 
-        collaborator_id = st.text_input("Enter Collaborator ID", value="user1")
-
-        def get_collaborative_history(collaborator_id: str) -> BaseChatMessageHistory:
-            if collaborator_id not in st.session_state.collaborative_store:
-                st.session_state.collaborative_store[collaborator_id] = ChatMessageHistory()
-            return st.session_state.collaborative_store[collaborator_id]
-
-        collaborative_history = get_collaborative_history(collaborator_id)
-
-        # Load all PDFs from the "pdfs" folder
+    elif tab == "Documents":
+        st.header("PDF Upload and Management")
+        uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
+        
+        if uploaded_files:
+            for uploaded_file in uploaded_files:
+                file_path = os.path.join("pdfs", uploaded_file.name)
+                with open(file_path, "wb") as file:
+                    file.write(uploaded_file.getvalue())
+            st.success(f"Uploaded {len(uploaded_files)} file(s) to the 'pdfs' folder.")
+        
+        # Display and download PDFs
+        pdf_files_sorted = sorted(os.listdir("pdfs"))
+        if pdf_files_sorted:
+            st.subheader("Available PDFs")
+            for pdf in pdf_files_sorted:
+                file_path = os.path.join("pdfs", pdf)
+                with open(file_path, "rb") as file:
+                    st.download_button(label=f"Download {pdf}", data=file, file_name=pdf, mime="application/pdf")
+        else:
+            st.write("No PDFs available.")
+        
+    elif tab == "Analysis":
+        st.header("Document Analysis")
+        
+        # Load and process PDFs
         pdf_files = sorted([os.path.join("pdfs", f) for f in os.listdir("pdfs") if f.endswith(".pdf")])
-
+        
         if pdf_files:
             documents = []
             for pdf_file in pdf_files:
                 loader = PyPDFLoader(pdf_file)
                 docs = loader.load()
                 documents.extend(docs)
-
-            # Summarization Feature
+            
+            # Summarization
             if st.button("Summarize PDFs"):
                 summary_chain = create_stuff_documents_chain(llm, ChatPromptTemplate.from_messages([
                     ("system", "Provide a concise summary of the following document content."),
                     MessagesPlaceholder("documents")
                 ]))
-
+                
                 summaries = []
                 for doc in documents:
-                    summary = summary_chain.invoke({"documents": doc.page_content})
+                    summary = summary_chain.invoke({"documents": [doc.page_content]})
                     summaries.append(summary)
-
+                
+                st.subheader("Document Summaries")
                 for i, summary in enumerate(summaries, 1):
-                    st.subheader(f"Summary of Document {i}:")
-                    st.write(summary)
-
-            # Context-Aware PDF Navigation
-            def navigate_pdf(pdf_path, context):
-                with pdfplumber.open(pdf_path) as pdf:
-                    for page_num, page in enumerate(pdf.pages):
-                        if context.lower() in page.extract_text().lower():
-                            st.write(f"Context found on page {page_num + 1}")
-                            if st.button(f"Go to Page {page_num + 1}"):
-                                st.write(page.extract_text())
-
-            if st.button("Navigate PDF"):
-                user_input = st.text_input("Enter context to search in PDF:")
-                if user_input:
-                    navigate_pdf(pdf_files[0], user_input)
-
-            # Split and create embeddings for the documents
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=500)
-            splits = text_splitter.split_documents(documents)
-            vectorstore = FAISS.from_documents(documents=splits, embedding=embeddings)
-            retriever = vectorstore.as_retriever()
-
-            # Visual Analytics Dashboard
-            def display_document_statistics(documents):
-                all_text = " ".join([doc.page_content for doc in documents])
-                words = all_text.split()
-                word_count = Counter(words)
-
-                # Display word count histogram
-                common_words = word_count.most_common(10)
-                words, counts = zip(*common_words)
-
-                fig, ax = plt.subplots()
-                ax.bar(words, counts)
-                st.pyplot(fig)
-
-                st.write("Total Word Count:", len(words))
-                st.write("Most Common Words:", common_words)
-
+                    st.write(f"Document {i}: {summary['output']}")
+            
+            # Document Statistics
             if st.button("Show Document Statistics"):
                 display_document_statistics(documents)
-
-            # Dynamic Document Query Suggestions
-            def suggest_queries(documents):
-                all_text = " ".join([doc.page_content for doc in documents])
-                keywords = list(set(all_text.split()))[:5]
-                st.write("Suggested Queries:")
-                for keyword in keywords:
-                    st.button(f"Ask about {keyword}")
-
+            
+            # Query Suggestions
             if st.button("Suggest Queries"):
                 suggest_queries(documents)
-
+            
             # Thematic Analysis
-            def thematic_analysis(documents):
-                all_texts = [doc.page_content for doc in documents]
-                vectorizer = TfidfVectorizer(stop_words='english')
-                X = vectorizer.fit_transform(all_texts)
-
-                kmeans = KMeans(n_clusters=5, random_state=42).fit(X)
-                labels = kmeans.labels_
-
-                st.write("Document Themes:")
-                for i, label in enumerate(set(labels)):
-                    st.write(f"Theme {i + 1}:")
-                    theme_texts = [all_texts[j] for j in range(len(all_texts)) if labels[j] == label]
-                    st.write(" ".join(theme_texts[:1]))  # Display first example
-
             if st.button("Analyze Document Themes"):
                 thematic_analysis(documents)
 
-            # System prompt for contextualizing the question
-            contextualize_q_system_prompt = (
-                "Given a chat history and the latest user question "
-                "which might reference context in the chat history, "
-                "formulate a standalone question which can be understood "
-                "without the chat history. Do NOT answer the question, "
-                "just reformulate it if needed and otherwise return it as is."
-            )
-            contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", contextualize_q_system_prompt),
-                    MessagesPlaceholder("chat_history"),
-                    ("human", "{input}"),
-                ]
-            )
+else:
+    st.warning("Please enter both the OpenAI and LangChain API keys in the sidebar.")
 
-            history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
+# Functions for managing session history and document analysis
+def get_session_history(session: str) -> BaseChatMessageHistory:
+    if session not in st.session_state:
+        st.session_state[session] = ChatMessageHistory()
+    return st.session_state[session]
 
-            # System prompt for answering the question
-            system_prompt = (
-                "You are an assistant for question-answering tasks. "
-                "Use the following pieces of retrieved context to answer "
-                "the question. If you don't know the answer, say that you "
-                "don't know. Use three sentences maximum and keep the "
-                "answer concise."
-                "\n\n"
-                "{context}"
-            )
-            qa_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system_prompt),
-                    MessagesPlaceholder("chat_history"),
-                    ("human", "{input}"),
-                ]
-            )
+def display_document_statistics(documents):
+    all_text = " ".join([doc.page_content for doc in documents])
+    words = all_text.split()
+    word_count = Counter(words)
 
-            question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-            rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    common_words = word_count.most_common(10)
+    words, counts = zip(*common_words)
 
-            # If RunnableWithMessageHistory doesn't exist or doesn't fit, use a similar pattern
-            conversational_rag_chain = rag_chain
+    fig, ax = plt.subplots()
+    ax.bar(words, counts)
+    st.pyplot(fig)
 
-            user_input = st.text_input("Your question:")
-            if user_input:
-                session_history = get_session_history(session_id)
-                response = conversational_rag_chain.invoke(
-                    {"input": user_input},
-                    config={
-                        "configurable": {"session_id": session_id}
-                    },
-                )
-                st.write("Assistant:", response['answer'])
-                st.write("Chat History:", session_history.messages)
-        else:
-            st.warning("No PDFs available in the 'pdfs' folder.")
-    else:
-        st.warning("Please enter both the OpenAI and LangChain API keys")
+    st.write("Total Word Count:", len(words))
+    st.write("Most Common Words:", common_words)
 
-# Sidebar (right column)
-with col2:
-    st.header("Available PDFs")
+def suggest_queries(documents):
+    all_text = " ".join([doc.page_content for doc in documents])
+    keywords = list(set(all_text.split()))[:5]
+    st.write("Suggested Queries:")
+    for keyword in keywords:
+        if st.button(f"Ask about {keyword}"):
+            st.session_state[session_id].add_message({"role": "user", "content": keyword})
 
-    # Upload PDFs in the right column
-    uploaded_files = st.file_uploader("Add a PDF", type="pdf", accept_multiple_files=True)
+def thematic_analysis(documents):
+    all_texts = [doc.page_content for doc in documents]
+    vectorizer = TfidfVectorizer(stop_words='english')
+    X = vectorizer.fit_transform(all_texts)
 
-    # Process and save uploaded PDFs to the "pdfs" folder
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            file_path = os.path.join("pdfs", uploaded_file.name)
-            with open(file_path, "wb") as file:
-                file.write(uploaded_file.getvalue())
-        st.success(f"Uploaded {len(uploaded_files)} file(s) to the 'pdfs' folder.")
+    kmeans = KMeans(n_clusters=5, random_state=42).fit(X)
+    labels = kmeans.labels_
 
-    # Display and download PDFs alphabetically
-    pdf_files_sorted = sorted(os.listdir("pdfs"))
-    for pdf in pdf_files_sorted:
-        file_path = os.path.join("pdfs", pdf)
-        with open(file_path, "rb") as file:
-            st.download_button(
-                label=f"Download {pdf}",
-                data=file,
-                file_name=pdf,
-                mime="application/pdf"
-            )
-
-    # Show Highlights in PDF
-    def display_pdf_with_highlights(pdf_path, highlights):
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                text = page.extract_text()
-                if any(highlight in text for highlight in highlights):
-                    st.write(f"Highlights on Page {page_num + 1}:")
-                    st.write(text)
-
-    if pdf_files and st.button("Show Highlights in PDF"):
-        for pdf_file in pdf_files:
-            display_pdf_with_highlights(pdf_file, [doc.page_content for doc in documents])
-    else:
-        st.write("No PDFs available.")
+    st.write("Document Themes:")
+    for i, label in enumerate(set(labels)):
+        st.write(f"Theme {i + 1}:")
+        theme_texts = [all_texts[j] for j in range(len(all_texts)) if labels[j] == label]
+        st.write(" ".join(theme_texts[:1]))  # Display first example
